@@ -1,0 +1,82 @@
+@startuml API_Data_Model
+
+skinparam classAttributeIconSize 0
+
+class InputData {
+    +timestamp: datetime
+    +frame_count: int
+    +cam_data: list<CameraFrame>
+}
+
+class CameraFrame {
+    +cam_id: CameraId
+    +objects: list<Detection>
+}
+
+class Detection {
+    +cls_name: ObjectType
+    +det_id: int
+    +bbox: ImageBBox
+}
+
+class ImageBBox {
+    +x_min: int
+    +y_min: int
+    +x_max: int
+    +y_max: int
+}
+
+class OutputData {
+    +timestamp: datetime
+    +frame_count: int
+    +tracks: list<TrackData>
+    +risk_assessments: list<RiskEvent>
+}
+
+class TrackData {
+    +track_id: int
+    +object_type: ObjectType
+    +motion: MotionVector
+    +history: list<LfdObservation>
+}
+
+class MotionVector {
+    +dx: float
+    +dy: float
+    +unit: str
+}
+
+class LfdObservation {
+    +bev_bbox: BevBBox
+    +missed_frames: int
+}
+
+class BevBBox {
+    +x_center: float
+    +y_center: float
+    +width: float
+    +height: float
+    +rotation: float
+}
+
+class RiskEvent {
+    +risk_type: RiskType
+    +distance_cm: float
+    +vehicle_track_id: int
+    +person_track_id: int
+}
+
+InputData *-- CameraFrame
+CameraFrame *-- Detection
+Detection *-- ImageBBox
+
+OutputData *-- TrackData
+OutputData *-- RiskEvent
+
+TrackData *-- MotionVector
+TrackData *-- LfdObservation
+LfdObservation *-- BevBBox
+
+RiskEvent ..> TrackData : track_id reference
+
+@enduml

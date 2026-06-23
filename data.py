@@ -1,5 +1,4 @@
 from enum import Enum, IntEnum
-from typing import Optional
 
 from pydantic import (
     AwareDatetime,
@@ -15,7 +14,6 @@ MISS_FRAMES_MAX_NUM = 3
 
 IMAGE_WIDTH = 640
 IMAGE_HEIGHT = 384
-
 
 # ====================== 共用設定 ======================
 
@@ -45,9 +43,11 @@ class RiskType(str, Enum):
     SAFE = "safe"
 
 
-class TrackType(str, Enum):
-    VEHICLE = "vehicle"
-    PEDESTRIAN = "pedestrian"
+class ObjectType(str, Enum):
+    TRUCK = "truck"
+    FORKLIFT = "forklift"
+    CAR = "car"
+    PERSON = "person"
 
 
 # ====================== Bounding Box ======================
@@ -88,53 +88,19 @@ class ImageBBox(ApiModel):
         return self
 
 
-class BevBBox(ApiModel):
-    """
-    BEV 座標系統上的物件框。
-
-    必須在 API 文件另外固定：
-    1. 座標單位是 pixel 還是 cm
-    2. 原點位置
-    3. x、y 軸方向
-    """
-
-    x_min: float = Field(description="BEV 左上角 x 座標")
-    y_min: float = Field(description="BEV 左上角 y 座標")
-    x_max: float = Field(description="BEV 右下角 x 座標")
-    y_max: float = Field(description="BEV 右下角 y 座標")
-
-    @model_validator(mode="after")
-    def validate_coordinates(self) -> Self:
-        if self.x_min >= self.x_max:
-            raise ValueError("x_min 必須小於 x_max")
-
-        if self.y_min >= self.y_max:
-            raise ValueError("y_min 必須小於 y_max")
-
-        return self
-
-
 # ====================== API Input ======================
 
 
 class Detection(ApiModel):
     """單一 YOLO 偵測結果。"""
 
-    detection_id: Optional[str] = Field(
-        default=None,
-        description="呼叫端產生的偵測框識別碼",
-    )
-    cls_name: str = Field(
-        min_length=1,
-        max_length=64,
-        description="物件分類名稱",
-    )
-    confidence: Optional[float] = Field(
-        default=None,
-        ge=0,
-        le=1,
-        description="偵測信心值，範圍為 0 到 1",
-    )
+    cls_name: ObjectType
+    det_id: int  # 單一鏡頭獨立不用考慮其他鏡頭 yolo 有內建
+    # confidence: float = Field(
+    #     ge=0,
+    #     le=1,
+    #     description="偵測信心值，範圍為 0 到 1",
+    # )
     bbox: ImageBBox
 
 
@@ -178,31 +144,37 @@ class InputData(ApiModel):
 
 
 class CameraProjection(ApiModel):
-    """
-    LfD 結果投影到原始鏡頭後的物件框。
-
-    此 bbox 不保證和輸入 Detection 的 bbox 一一對應。
-    """
+    """LfD 結果，包含使用到的原始鏡頭後的物件框。"""
 
     cam_id: CameraId
     bbox: ImageBBox
 
 
+class BevBBox(ApiModel):
+    """
+    BEV 座標系統上的物件框。
+
+    必須在 API 文件另外固定：
+    1. 座標單位是 pixel 還是 cm
+    2. 原點位置（例如 BEV 圖像中心或某個角落）
+    """
+
+    x_center: float = Field(description="BEV 中心點 x 座標")
+    y_center: float = Field(description="BEV 中心點 y 座標")
+    width: float = Field(description="BEV 物件框寬度")
+    height: float = Field(description="BEV 物件框高度")
+    rotation: float = Field(description="物件框旋轉角度，單位為度，逆時針方向為正")
+
+
 class LfdObservation(ApiModel):
     """單一追蹤物件在某個影格的 LfD 結果。"""
 
-    timestamp: AwareDatetime = Field(
-        description="此追蹤點對應的時間",
-    )
-    frame_count: int = Field(
-        ge=0,
-        description="此追蹤點對應的影格編號",
-    )
     bev_bbox: BevBBox
     camera_projections: list[CameraProjection] = Field(
         default_factory=list,
-        description="LfD 結果投影至各鏡頭的物件框",
+        description=" LfD 用到的各鏡頭的物件框",
     )
+
     missed_frames: int = Field(
         ge=0,
         le=MISS_FRAMES_MAX_NUM,
@@ -222,7 +194,7 @@ class MotionVector(ApiModel):
         description="y 軸方向位移或速度",
     )
     unit: str = Field(
-        description="向量單位，例如 pixel/frame 或 cm/s",
+        description="速度向量單位 m/s",
     )
 
 
@@ -233,7 +205,7 @@ class TrackData(ApiModel):
         ge=0,
         description="目前工作階段內唯一的追蹤編號",
     )
-    track_type: TrackType
+    object_type: ObjectType
     motion: MotionVector
     history: list[LfdObservation] = Field(
         min_length=1,
@@ -255,7 +227,7 @@ class RiskAssessment(ApiModel):
         ge=0,
         description="車輛追蹤編號",
     )
-    pedestrian_track_id: int = Field(
+    person_track_id: int = Field(
         ge=0,
         description="行人追蹤編號",
     )
@@ -292,7 +264,7 @@ class OutputData(ApiModel):
 
         for assessment in self.risk_assessments:
             vehicle = track_map.get(assessment.vehicle_track_id)
-            pedestrian = track_map.get(assessment.pedestrian_track_id)
+            person = track_map.get(assessment.person_track_id)
 
             if vehicle is None:
                 raise ValueError(
@@ -300,16 +272,20 @@ class OutputData(ApiModel):
                     f"{assessment.vehicle_track_id}"
                 )
 
-            if pedestrian is None:
+            if person is None:
                 raise ValueError(
-                    "pedestrian_track_id 找不到對應的追蹤物件："
-                    f"{assessment.pedestrian_track_id}"
+                    "person_track_id 找不到對應的追蹤物件："
+                    f"{assessment.person_track_id}"
                 )
 
-            if vehicle.track_type != TrackType.VEHICLE:
-                raise ValueError("vehicle_track_id 指向的物件不是 vehicle")
+            if vehicle.object_type not in [
+                ObjectType.TRUCK,
+                ObjectType.FORKLIFT,
+                ObjectType.CAR,
+            ]:
+                raise ValueError("vehicle_track_id 指向的物件不是 truck/forklift/car")
 
-            if pedestrian.track_type != TrackType.PEDESTRIAN:
-                raise ValueError("pedestrian_track_id 指向的物件不是 pedestrian")
+            if person.object_type != ObjectType.PERSON:
+                raise ValueError("person_track_id 指向的物件不是 person")
 
         return self

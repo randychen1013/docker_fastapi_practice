@@ -1,93 +1,94 @@
-from math import hypot
+import random
 
 from fastapi import FastAPI
 
 from data import (
     BevBBox,
+    CameraId,
     CameraProjection,
+    ImageBBox,
     InputData,
     LfdObservation,
     MotionVector,
+    ObjectType,
     OutputData,
     RiskAssessment,
     RiskType,
     TrackData,
-    TrackType,
 )
-
 
 app = FastAPI(title="Mock Tracking API")
 
+VEHICLE_TYPES = [ObjectType.TRUCK, ObjectType.FORKLIFT, ObjectType.CAR]
 
-def _track_type(cls_name: str) -> TrackType:
-    """Treat person-like labels as pedestrians and all others as vehicles."""
-    if cls_name.lower() in {"person", "pedestrian"}:
-        return TrackType.PEDESTRIAN
-    return TrackType.VEHICLE
+def random_image_bbox() -> ImageBBox:
+    width = random.randint(40, 120)
+    height = random.randint(50, 140)
+    x_min = random.randint(0, 640 - width)
+    y_min = random.randint(0, 384 - height)
+
+    return ImageBBox(
+        x_min=x_min,
+        y_min=y_min,
+        x_max=x_min + width,
+        y_max=y_min + height,
+    )
 
 
-def mock_input_to_output(input_data: InputData) -> OutputData:
-    """Build deterministic mock tracking output from the supplied detections."""
-    tracks: list[TrackData] = []
+def random_camera_projection(cam_id: CameraId) -> CameraProjection:
+    bbox = random_image_bbox()
+    return CameraProjection(cam_id=cam_id, bbox=bbox)
 
-    for camera in input_data.cam_data:
-        for detection in camera.objects:
-            bbox = detection.bbox
-            track_id = len(tracks)
-            tracks.append(
-                TrackData(
-                    track_id=track_id,
-                    track_type=_track_type(detection.cls_name),
-                    motion=MotionVector(dx=0.0, dy=0.0, unit="pixel/frame"),
-                    history=[
-                        LfdObservation(
-                            timestamp=input_data.timestamp,
-                            frame_count=input_data.frame_count,
-                            bev_bbox=BevBBox(
-                                x_min=float(bbox.x_min),
-                                y_min=float(bbox.y_min),
-                                x_max=float(bbox.x_max),
-                                y_max=float(bbox.y_max),
-                            ),
-                            camera_projections=[
-                                CameraProjection(cam_id=camera.cam_id, bbox=bbox)
-                            ],
-                            missed_frames=0,
-                        )
-                    ],
-                )
-            )
 
-    vehicles = [track for track in tracks if track.track_type == TrackType.VEHICLE]
-    pedestrians = [
-        track for track in tracks if track.track_type == TrackType.PEDESTRIAN
+def random_lfd_observation() -> LfdObservation:
+    bev_bbox = BevBBox(
+        x_center=random.uniform(0, 640),
+        y_center=random.uniform(0, 384),
+        width=random.uniform(20, 100),
+        height=random.uniform(20, 100),
+        rotation=random.uniform(-180, 180),
+    )
+
+    cam_ids = random.choices(list(CameraId), k=random.randint(1, 3))
+    camera_projections = [random_camera_projection(cam_id) for cam_id in cam_ids]
+    return LfdObservation(bev_bbox=bev_bbox, camera_projections=camera_projections, missed_frames=random.randint(0, 2))
+
+def random_track_data(track_id: int, object_type: ObjectType) -> TrackData:
+
+    motion = MotionVector(
+        dx=random.uniform(-6, 6),
+        dy=random.uniform(-6, 6),
+        unit="m/s",
+    )
+    history = [random_lfd_observation() for _ in range(random.randint(1, 5))]
+
+    return TrackData(
+        track_id=track_id,
+        object_type=object_type,
+        motion=motion,
+        history=history,
+    )
+
+def random_risk_assessment(vehicle_track_id: int, person_track_id: int) -> RiskAssessment:
+    return RiskAssessment(
+        risk_type=random.choice(list(RiskType)),
+        distance_cm=random.uniform(10, 500),
+        vehicle_track_id=vehicle_track_id,
+        person_track_id=person_track_id,
+    )
+
+def random_output_data(input_data: InputData) -> OutputData:
+
+    vehicles = [random_track_data(track_id, random.choice(VEHICLE_TYPES)) for track_id in range(2)]
+    persons = [random_track_data(track_id, ObjectType.PERSON) for track_id in range(2,4)]
+    tracks = vehicles + persons
+
+    risk_pairs = [(vehicle, person) for vehicle in vehicles for person in persons]
+    selected_pairs = random.sample(risk_pairs, k=3)
+    risk_assessments = [
+        random_risk_assessment(vehicle.track_id, person.track_id)
+        for vehicle, person in selected_pairs
     ]
-    risk_assessments: list[RiskAssessment] = []
-
-    for vehicle in vehicles:
-        vehicle_box = vehicle.history[-1].bev_bbox
-        vehicle_center = (
-            (vehicle_box.x_min + vehicle_box.x_max) / 2,
-            (vehicle_box.y_min + vehicle_box.y_max) / 2,
-        )
-        for pedestrian in pedestrians:
-            pedestrian_box = pedestrian.history[-1].bev_bbox
-            pedestrian_center = (
-                (pedestrian_box.x_min + pedestrian_box.x_max) / 2,
-                (pedestrian_box.y_min + pedestrian_box.y_max) / 2,
-            )
-            distance = hypot(
-                vehicle_center[0] - pedestrian_center[0],
-                vehicle_center[1] - pedestrian_center[1],
-            )
-            risk_assessments.append(
-                RiskAssessment(
-                    risk_type=RiskType.HAZARD if distance < 100 else RiskType.SAFE,
-                    distance_cm=distance,
-                    vehicle_track_id=vehicle.track_id,
-                    pedestrian_track_id=pedestrian.track_id,
-                )
-            )
 
     return OutputData(
         timestamp=input_data.timestamp,
@@ -97,6 +98,12 @@ def mock_input_to_output(input_data: InputData) -> OutputData:
     )
 
 
+
 @app.post("/mock", response_model=OutputData)
 def mock_tracking(input_data: InputData) -> OutputData:
-    return mock_input_to_output(input_data)
+    return random_output_data(input_data)
+
+
+def process_input_data(input_data: InputData) -> OutputData:
+    """Randomly build OutputData with vehicle/person tracks and three risks."""
+    return random_output_data(input_data)
