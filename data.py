@@ -95,16 +95,11 @@ class Detection(ApiModel):
     """單一 YOLO 偵測結果。"""
 
     cls_name: ObjectType
-    det_id: int  # 單一鏡頭獨立不用考慮其他鏡頭 yolo 有內建
-    # confidence: float = Field(
-    #     ge=0,
-    #     le=1,
-    #     description="偵測信心值，範圍為 0 到 1",
-    # )
+    det_id: int 
     bbox: ImageBBox
 
 
-class CameraFrame(ApiModel):
+class CameraData(ApiModel):
     """單一鏡頭在目前影格中的偵測資料。"""
 
     cam_id: CameraId
@@ -124,7 +119,7 @@ class InputData(ApiModel):
         ge=0,
         description="目前工作階段內單調遞增的影格編號",
     )
-    cam_data: list[CameraFrame] = Field(
+    cam_data: list[CameraData] = Field(
         min_length=1,
         max_length=8,
         description="各鏡頭目前影格的偵測資料",

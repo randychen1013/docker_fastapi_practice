@@ -1,14 +1,16 @@
 @startuml API_Data_Model
 
+' skinparam classAttributeIconSize 0
 skinparam classAttributeIconSize 0
+
 
 class InputData {
     +timestamp: datetime
     +frame_count: int
-    +cam_data: list<CameraFrame>
+    +cam_data: list<CameraData>
 }
 
-class CameraFrame {
+class CameraData {
     +cam_id: CameraId
     +objects: list<Detection>
 }
@@ -46,11 +48,6 @@ class MotionVector {
     +unit: str
 }
 
-class LfdObservation {
-    +bev_bbox: BevBBox
-    +missed_frames: int
-}
-
 class BevBBox {
     +x_center: float
     +y_center: float
@@ -59,6 +56,18 @@ class BevBBox {
     +rotation: float
 }
 
+class CameraProjection {
+    +cam_id: CameraId
+    +bbox: ImageBBox
+}
+
+class LfdObservation {
+    +bev_bbox: BevBBox
+    +camera_projections: list<CameraProjection>
+    +missed_frames: int
+}
+
+
 class RiskEvent {
     +risk_type: RiskType
     +distance_cm: float
@@ -66,8 +75,8 @@ class RiskEvent {
     +person_track_id: int
 }
 
-InputData *-- CameraFrame
-CameraFrame *-- Detection
+InputData *-- CameraData
+CameraData *-- Detection
 Detection *-- ImageBBox
 
 OutputData *-- TrackData
@@ -76,7 +85,22 @@ OutputData *-- RiskEvent
 TrackData *-- MotionVector
 TrackData *-- LfdObservation
 LfdObservation *-- BevBBox
+LfdObservation *-- CameraProjection 
 
-RiskEvent ..> TrackData : track_id reference
+CameraProjection *-- ImageBBox
+
+class InputData #LightBlue
+class CameraData #LightBlue
+class Detection #LightBlue
+class ImageBBox #LightBlue
+
+class OutputData #ffc79a
+class TrackData #ffc79a
+class MotionVector #ffc79a
+class BevBBox #ffc79a
+class CameraProjection #ffc79a
+class LfdObservation #ffc79a
+class RiskEvent #ffc79a
+
 
 @enduml

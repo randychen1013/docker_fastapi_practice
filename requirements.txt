@@ -2,3 +2,5 @@ fastapi==0.128.8
 uvicorn==0.39.0
 pydantic==2.12.5
 typing-extensions==4.15.0
+
+
