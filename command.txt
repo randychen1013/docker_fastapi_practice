@@ -1,0 +1,2 @@
+docker build --no-cache -t ncku-api-example:1.0.0 .
+docker save -o mock-fastapi-api-1.0.0.tar mock-fastapi-api:1.0.0
